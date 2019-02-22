@@ -1,0 +1,186 @@
+---
+title: "VSL Pre-/Post-eval summary"
+author: "David Kent (dk657)"
+date: "June 13, 2017"
+output: 
+  html_document:
+    toc: true
+---
+
+
+```{r load, include=FALSE}
+library(knitr)
+library(lsmeans)
+source("plot_all_defects.R")
+```
+
+## Radial plots of incorrect marks
+```{r fig.width=12,fig.height=7}
+for( i in unique(incorrect_marks$Defect) ) {
+  incorrect_marks %>%
+    filter(Defect==i) %>%
+    mutate(incorrect_defect=ifelse(incorrect_defect==i,
+                                   paste(i,"\n+ Other"),
+                                   incorrect_defect)) %>%
+    mutate(incorrect_defect=gsub("_","\n",incorrect_defect)) -> temp
+  tests %>% 
+    filter(Defect==i) %>% 
+    summarize(n_total=n(),
+              n_incorrect=n() - sum(correct)) -> n_summary
+  
+  ggplot(temp, aes(x=incorrect_defect,
+             y=num_marked,
+             color=Pre_Post,
+             fill=Pre_Post)) +
+    theme_bw() +
+    labs(title=paste(i,"Samples"),
+         x="Marked Defect",
+         y="Number Marked",
+         fill="Pre- or Post-Test",
+         color="Pre- or Post-Test",
+         caption=paste("Of",
+                       n_summary$n_total,
+                       i,
+                       "samples,",
+                       n_summary$n_incorrect,
+                       "were marked incorrectly; a single sample can be marked multiple defects")) +
+    #theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+    scale_y_continuous(breaks=1:(incorrect_marks %>% filter(Defect==i) %>% select(num_marked) %>% max())) +
+    geom_bar(stat="identity", position="dodge") +
+    coord_polar() +
+    facet_grid(~Initial_Text) -> g
+  print(g)
+  #ggsave(filename = paste(i,".pdf",sep=""),
+  #       plot = g,
+  #       device= "pdf",
+  #       width=11,
+  #       height=8.5,
+  #       units = "in",
+  #       path = "pdfs")
+}
+```
+
+## Standard plots of incorrect marks
+```{r fig.width=12,fig.height=7}
+for( i in unique(incorrect_marks$Defect) ) {
+  ggplot(incorrect_marks %>%
+           filter(Defect==i) %>%
+           rename(),
+         aes(x=incorrect_defect,
+             y=num_marked,
+             color=Pre_Post,
+             fill=Pre_Post)) +
+    theme_bw() +
+    labs(title=paste(i,"Samples"),
+         x="Marked Defect",
+         y="Number Marked",
+         fill="Pre- or Post-Test",
+         color="Pre- or Post-Test") +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+    scale_y_continuous(breaks=1:(incorrect_marks %>% filter(Defect==i) %>% select(num_marked) %>% max())) +
+    geom_bar(stat="identity", position="dodge") +
+    #coord_polar() +
+    facet_grid(~Initial_Text) -> g
+  print(g)
+}
+```
+
+# Statistics
+
+In the following, we fit a generalized (logistic) linear model. Each observation
+consists of one prepared sample, and is regarded as a "success" if the prepared
+defect was marked appropriately by the panelist, and a "failure" otherwise. We
+use a three-way interaction of "Pre_Post" (whether the test was occurring before
+or after a training session), "initial" (whether this test was associated with 
+the panelist's first training session), and "Defect" (what the prepared defect
+was), and associated two-way interactions and main effects. Milk_Type (skim or
+2%) was a included as a blocking effect.
+
+We use the least-squares means estimates from this model to visualize andassess
+the contrasts between Pre/Post and Initial/Re-training effects.
+
+### Fit model; compute least-square means
+```{r}
+tests %>%
+  filter(!(Pre_Post=="Post" & Defect=="Fruity_Fermented" & initial=="Re-training")) %>%
+  glm(correct~initial*Pre_Post*Defect+Milk_Type,
+      data=.,
+      family="binomial") -> m
+
+lsmeans(object=m,~initial+Defect+Pre_Post) %>%
+  summary() %>%
+  data.frame() -> estimated_for_plot
+
+estimated_for_plot$lsmean[estimated_for_plot$Pre_Post=="Post" &
+                            estimated_for_plot$Defect=="Fruity_Fermented" &
+                            estimated_for_plot$initial=="Re-training"] <- Inf
+```
+
+### Plot of changes from before and after training
+```{r fig.width=12,fig.height=7}
+estimated_for_plot %>%
+  ggplot(aes(x=Defect,y=plogis(lsmean))) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  geom_path(arrow = arrow(length=unit(0.30,"cm"), ends="last", type = "closed"),
+            position=position_dodge(width=1)) +
+  geom_point(aes(color=Pre_Post)) +
+  labs(x="Defect",y="Percent Correct",color="Pre- or post-training") +
+  facet_grid(.~initial)
+```
+
+### Plot of changes from before and after training (log-odds)
+```{r fig.width=12,fig.height=7}
+estimated_for_plot %>%
+  ggplot(aes(x=Defect,y=lsmean)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  geom_path(arrow = arrow(length=unit(0.30,"cm"), ends="last", type = "closed"),
+            position=position_dodge(width=1)) +
+  geom_point(aes(color=Pre_Post)) +
+  labs(x="Defect",y="Log-odds correct",color="Pre- or post-training") +
+  facet_grid(.~initial)
+```
+
+### Plot comparing Initial and Re-training
+```{r fig.width=12,fig.height=7}
+estimated_for_plot %>%
+  ggplot(aes(x=Defect,y=plogis(lsmean))) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  geom_path(arrow = arrow(length=unit(0.30,"cm"), ends="last", type = "closed"),
+            position=position_dodge(width=1)) +
+  geom_point(aes(color=initial)) +
+  labs(x="Defect",y="Percent Correct",color="Initial or Re-training") +
+  facet_grid(.~Pre_Post)
+```
+
+### Pairwise comparison between Pre/Post within Defect and Initial/Re-training
+```{r results="asis"}
+lsmeans(object=m,pairwise~Pre_Post|Defect+initial,adjust="none") %>%
+  summary() -> lsm_pre_post 
+
+lsm_pre_post$contrasts %>%
+  data.frame() -> pre_post_contrasts
+
+pre_post_contrasts$p.adj <- p.adjust(pre_post_contrasts$p.value,method = "holm")
+
+pre_post_contrasts$signif <- pre_post_contrasts$p.adj < 0.05
+
+kable(pre_post_contrasts)
+```
+
+### Pairwise comparison between Initial/Re-training within Defect and Pre/Post
+```{r}
+lsmeans(object=m,pairwise~initial|Defect+Pre_Post,adjust="none") %>%
+  summary() -> lsm_initial
+
+lsm_initial$contrasts %>%
+  data.frame() -> initial_contrasts
+
+initial_contrasts$p.adj <- p.adjust(initial_contrasts$p.value,method = "holm")
+
+initial_contrasts$signif <- initial_contrasts$p.adj < 0.05
+
+kable(initial_contrasts)
+```
